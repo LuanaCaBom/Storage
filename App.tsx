@@ -1,21 +1,66 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
-import { StatusBar } from 'expo-status-bar';
-
-import { Button, Image, View, StyleSheet, Alert } from 'react-native';
+import { Button, Image, View, StyleSheet, Alert, Text, FlatList, SafeAreaView, ActivityIndicator } from 'react-native';
 
 import * as ImagePicker from 'expo-image-picker';
 
-import { Camera } from 'expo-camera';
-
 import { storage } from './src/firebaseConfig';
 
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { getDownloadURL, ref, uploadBytes, listAll } from "firebase/storage";
+
+
 
 export default function App() {
 
  const [imageUri, setImageUri] = useState<string | null>(null);
- const [isupload, setisUpload] = useState(false);
+
+ const [isUploading, setIsUploading] = useState(false);
+
+ const [gallery, setGallery] = useState([]);
+
+ const [isLoading, setIsLoading] = useState(true);
+
+
+ // Efeito que carrega as imagens da galeria ao iniciar o app
+
+ useEffect(() => {
+
+   listarImagens();
+
+ }, []);
+
+
+ const listarImagens = async () => {
+
+   setIsLoading(true);
+
+   try {
+
+     const listRef = ref(storage, 'images/');
+
+     const res = await listAll(listRef);
+
+
+     const urlPromises = res.items.map(itemRef => getDownloadURL(itemRef));
+
+
+     const urls = await Promise.all(urlPromises);
+
+     setGallery(urls);
+
+   } catch (error) {
+
+     console.error("Erro ao listar imagens: ", error);
+
+     Alert.alert("Erro", "Não foi possível carregar a galeria de imagens.");
+
+   } finally {
+
+     setIsLoading(false);
+
+   }
+
+ };
 
 
  const escolherImagemDaGaleria = async () => {
@@ -35,11 +80,11 @@ export default function App() {
 
      mediaTypes: ImagePicker.MediaTypeOptions.Images,
 
-     allowsEditing: true, //pode editar a imagem selecionada
+     allowsEditing: true,
 
-     aspect: [4, 3], //formato da imagem
+     aspect: [4, 3],
 
-     quality: 1, //entre 0 e 1, onde 1 é o melhor
+     quality: 1,
 
    });
 
@@ -84,60 +129,118 @@ export default function App() {
    }
 
  };
+
+
  const uploadImagem = async () => {
-  if(!imageUri){
-    Alert.alert("Nenhuma imagem selecionada!", "Selecione uma imagem");
-    return
-  }
-  setisUpload(true);
-  try{
-    //conversão de imagem uri para blob
-    const resposta = await fetch(imageUri);
-    const blob = await resposta.blob();
-    //definir referência para o arquivo
-    const nomeArq = `${Date.now()}.jpg`
-    const storageRef = ref(storage, 'images/'+nomeArq);
 
-    console.log('Destino: ' + `images/${nomeArq}`)
-    await uploadBytes(storageRef, blob);
-    Alert.alert('upload ok')
-    const download = await getDownloadURL(storageRef);
+   if (!imageUri) {
 
-  }catch(error){
-    console.log("ERRO: " + error);
-    Alert.alert("Erro no upload")
-  }finally{
-    setisUpload(false);
-    setImageUri(null);
-  }
- }
+     Alert.alert("Nenhuma imagem selecionada", "Por favor, escolha uma imagem primeiro.");
 
+     return;
+
+   }
+
+
+   setIsUploading(true);
+
+
+   try {
+
+     const response = await fetch(imageUri);
+
+     const blob = await response.blob();
+
+     const nomeArquivo = `${Date.now()}.jpg`;
+
+     const storageRef = ref(storage, 'images/' + nomeArquivo);
+
+     console.log("Tentando upload para:", `images1/${nomeArquivo}`);
+
+     console.log("Blob size:", blob.size, "type:", blob.type);
+
+     const snapshot = await uploadBytes(storageRef, blob);
+
+     const downloadURL = await getDownloadURL(snapshot.ref);
+
+     console.log('Arquivo disponível em', downloadURL);
+
+
+     Alert.alert("Upload concluído!", "Sua imagem foi enviada com sucesso!");
+
+     // Após o upload, atualiza a galeria para incluir a nova imagem
+
+     listarImagens();    
+
+   } catch (error) {
+
+     console.error("Erro no upload: ", error);
+
+     Alert.alert("Erro no Upload", "Ocorreu um erro ao enviar sua imagem.");
+
+   } finally {
+
+     setIsUploading(false);
+
+     setImageUri(null);
+
+   }
+
+ };
 
 
  return (
 
-   <View style={styles.container}>
+   <SafeAreaView style={styles.container}>
 
-     <Button title="Escolher Imagem da Galeria" onPress={escolherImagemDaGaleria} />
+     <Text style={styles.title}>Galeria do Firebase</Text>    
 
-     <View style={{ height: 10 }} />
+     {isLoading ? (
 
-     <Button title="Tirar Foto com a Câmera" onPress={tirarFoto} />
+       <ActivityIndicator size="large" color="#0000ff" />
+
+     ) : (
+
+       <FlatList
+
+         data={gallery}
+
+         keyExtractor={(item) => item}
+
+         renderItem={({ item }) => (
+
+           <Image source={{ uri: item }} style={styles.galleryImage} />
+
+         )}
+
+         numColumns={3}
+
+         ListEmptyComponent={<Text>Nenhuma imagem na galeria.</Text>}
+
+       />
+
+     )}
 
 
-     {/* Exibe a imagem apenas se uma URI estiver definida */}
+     <View style={styles.uploadSection}>
 
-     {imageUri && <Image source={{ uri: imageUri }} style={styles.image} />}
-     <Button
-      title={isupload ?
-        "Enviando..." : "Enviar para Storage"}
-        onPress={uploadImagem}
-        disabled={!imageUri || isupload}
-        
-     />
-     <StatusBar style='auto'/>
+       {imageUri && <Image source={{ uri: imageUri }} style={styles.previewImage} />}
 
-   </View>
+       <Button title="Escolher Imagem" onPress={escolherImagemDaGaleria} />
+
+       <Button
+
+         title={isUploading ? "Enviando..." : "Enviar Imagem"}
+
+         onPress={uploadImagem}
+
+         disabled={!imageUri || isUploading}
+
+       />
+
+     </View>
+
+   </SafeAreaView>
 
  );
 
@@ -146,30 +249,62 @@ export default function App() {
 
 const styles = StyleSheet.create({
 
- container: {
+container: {
 
    flex: 1,
 
-   alignItems: 'center',
+   paddingTop: 40,
 
-   justifyContent: 'center',
-
-   padding: 20,
+   paddingBottom: 80,
 
    backgroundColor: '#fff',
 
  },
 
- image: {
+ title: {
 
-   width: 300,
+   fontSize: 24,
 
-   height: 300,
+   fontWeight: 'bold',
 
-   marginTop: 20,
+   textAlign: 'center',
+
+   marginBottom: 20,
+
+ },
+
+ galleryImage: {
+
+   width: 120,
+
+   height: 120,
+
+   margin: 5,
+
+ },
+
+ uploadSection: {
+
+   padding: 20,
+
+   borderTopWidth: 1,
+
+   borderTopColor: '#ccc',
+
+   alignItems: 'center',
+
+ },
+
+ previewImage: {
+
+   width: 100,
+
+   height: 100,
 
    borderRadius: 10,
 
- },
+   marginBottom: 10,
+
+ }
 
 });
